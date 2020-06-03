@@ -11,6 +11,7 @@ from path import Path as path
 import shutil
 
 from gutenbergtozim import logger, VERSION
+from gutenbergtozim.s3 import s3_credentials_ok
 from gutenbergtozim.database import setup_database
 from gutenbergtozim.rdf import setup_rdf_folder, parse_and_fill
 from gutenbergtozim.download import download_all_books
@@ -68,7 +69,8 @@ help = (
     """(overwritten by --zim step)
 --zim                           Create a ZIM file
 --title-search                  Add title search parameter
---bookshelves                   Add bookshelves 
+--bookshelves                   Add bookshelves
+--optimization-cache            URL with credentials to S3 bucket for using as optimization cache
 
 This script is used to produce a ZIM file (and any intermediate state)
 of Gutenberg repository using a mirror."""
@@ -106,6 +108,13 @@ def main(arguments):
     NO_INDEX = arguments.get("--no-index", False)
     TITLE_SEARCH = arguments.get("--title-search", False)
     BOOKSHELVES = arguments.get("--bookshelves", False)
+    OPTIMIZATION_CACHE = arguments.get("--optimization-cache") or None
+
+
+    if OPTIMIZATION_CACHE:
+        s3_storage = s3_credentials_ok(OPTIMIZATION_CACHE)
+        if not s3_storage:
+            raise ValueError("Unable to connect to Optimization Cache. Check its URL.")
 
     # create tmp dir
     path("tmp").mkdir_p()
@@ -185,6 +194,7 @@ def main(arguments):
             formats=FORMATS,
             only_books=BOOKS,
             force=FORCE,
+            s3_storage=s3_storage
         )
     if ONE_LANG_ONE_ZIM_FOLDER:
         if LANGUAGES == []:
@@ -213,6 +223,7 @@ def main(arguments):
                 force=FORCE,
                 title_search=TITLE_SEARCH,
                 add_bookshelves=BOOKSHELVES,
+                s3_storage=s3_storage
             )
 
         if DO_DEV:

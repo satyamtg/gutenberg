@@ -17,6 +17,7 @@ from gutenbergtozim.urls import get_urls
 from gutenbergtozim.database import BookFormat, Format, Book
 from gutenbergtozim.export import get_list_of_filtered_books, fname_for
 from gutenbergtozim.utils import download_file, FORMAT_MATRIX, ensure_unicode
+from gutenbergtozim.s3 import download_from_cache
 
 IMAGE_BASE = "http://aleph.gutenberg.org/cache/epub/"
 
@@ -101,7 +102,7 @@ def handle_zipped_epub(zippath, book, download_cache):
     path(tmpd).rmtree_p()
 
 
-def download_book(book, download_cache, languages, formats, force):
+def download_book(book, download_cache, languages, formats, force, s3_storage):
     logger.info("\tDownloading content files for Book #{id}".format(id=book.id))
 
     # apply filters
@@ -115,13 +116,20 @@ def download_book(book, download_cache, languages, formats, force):
     for format in formats:
 
         fpath = os.path.join(download_cache, fname_for(book, format))
+        optimized_fpath = os.path.join(download_cache, "{}.optimized".format(fname_for(book, format)))
 
         # check if already downloaded
-        if path(fpath).exists() and not force:
+        if path(fpath).exists() or path(optimized_fpath).exists() and not force:
             logger.debug(
                 "\t\t{fmt} already exists at {path}".format(fmt=format, path=fpath)
             )
             continue
+
+        # try to download from cache
+        if s3_storage:
+            if download_from_cache(fname_for(book, format), optimized_fpath, s3_storage):
+                continue
+
 
         # retrieve corresponding BookFormat
         bfs = BookFormat.filter(book=book)
@@ -245,21 +253,23 @@ def download_book(book, download_cache, languages, formats, force):
             continue
 
 
-def download_covers(book, download_cache):
+def download_covers(book, download_cache, s3_storage):
     cover = "{}_cover.jpg".format(book.id)
     fpath = os.path.join(download_cache, cover)
+    optimized_fpath = os.path.join(download_cache, "{}.optimized".format(cover))
     has_cover = Book.select(Book.cover_page).where(Book.id == book.id)
     if has_cover:
         title = "{}{}/pg{}.cover.medium.jpg".format(IMAGE_BASE, book.id, book.id)
         logger.debug("Downloading {}".format(title))
-        download_file(title, fpath)
+        if not s3_storage or (s3_storage and not download_from_cache(title, optimized_fpath, s3_storage)):
+            download_file(title, fpath)
     else:
         logger.debug("No Book Cover found for Book #{}".format(book.id))
     return True
 
 
 def download_all_books(
-    download_cache, concurrency, languages=[], formats=[], only_books=[], force=False
+    download_cache, concurrency, languages=[], formats=[], only_books=[], force=False, s3_storage=False
 ):
     available_books = get_list_of_filtered_books(
         languages=languages, formats=formats, only_books=only_books
@@ -269,10 +279,10 @@ def download_all_books(
     path(download_cache).mkdir_p()
 
     def dlb(b):
-        return download_book(b, download_cache, languages, formats, force)
+        return download_book(b, download_cache, languages, formats, force, s3_storage)
 
     def dlb_covers(b):
-        return download_covers(b, download_cache)
+        return download_covers(b, download_cache, s3_storage)
 
     Pool(concurrency).map(dlb, available_books)
     Pool(concurrency).map(dlb_covers, available_books)

@@ -37,6 +37,7 @@ from gutenbergtozim.utils import (
 from gutenbergtozim.database import Book, Format, BookFormat, Author
 from gutenbergtozim.iso639 import language_name
 from gutenbergtozim.l10n import l10n_strings
+from gutenbergtozim.s3 import upload_to_cache
 
 from itertools import groupby
 
@@ -174,6 +175,7 @@ def export_all_books(
     force=False,
     title_search=False,
     add_bookshelves=False,
+    s3_storage=False
 ):
 
     project_id = get_project_id(
